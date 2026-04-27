@@ -1,0 +1,200 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\SalesPage;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class SalesPageApiTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_guest_cannot_access_sales_pages_endpoints(): void
+    {
+        $this->getJson('/api/sales-pages')->assertUnauthorized();
+        $this->postJson('/api/sales-pages', [])->assertUnauthorized();
+    }
+
+    public function test_authenticated_user_can_list_only_their_sales_pages(): void
+    {
+        $user = User::factory()->create();
+        $otherUser = User::factory()->create();
+
+        $ownedPage = SalesPage::query()->create([
+            'user_id' => $user->id,
+            'product_name' => 'Madu Hutan Liar',
+            'raw_input' => ['description' => 'Madu murni'],
+            'ai_output' => $this->validAiOutput('Beli Madu Hutan Asli'),
+            'theme' => 'dark-luxury',
+        ]);
+
+        SalesPage::query()->create([
+            'user_id' => $otherUser->id,
+            'product_name' => 'Kopi Arabika',
+            'raw_input' => ['description' => 'Kopi premium'],
+            'ai_output' => $this->validAiOutput('Seduh Kopi Premium'),
+            'theme' => 'minimalist',
+        ]);
+
+        $response = $this->withToken($this->tokenFor($user))
+            ->getJson('/api/sales-pages');
+
+        $response
+            ->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonFragment([
+                'id' => $ownedPage->id,
+                'product_name' => 'Madu Hutan Liar',
+            ]);
+    }
+
+    public function test_authenticated_user_can_view_their_own_sales_page_detail(): void
+    {
+        $user = User::factory()->create();
+        $salesPage = SalesPage::query()->create([
+            'user_id' => $user->id,
+            'product_name' => 'Madu Hutan Liar',
+            'raw_input' => ['description' => 'Madu murni'],
+            'ai_output' => $this->validAiOutput('Beli Madu Hutan Asli'),
+            'theme' => 'dark-luxury',
+        ]);
+
+        $response = $this->withToken($this->tokenFor($user))
+            ->getJson("/api/sales-pages/{$salesPage->id}");
+
+        $response
+            ->assertOk()
+            ->assertJson([
+                'id' => $salesPage->id,
+                'product_name' => 'Madu Hutan Liar',
+                'theme' => 'dark-luxury',
+            ]);
+    }
+
+    public function test_user_cannot_view_another_users_sales_page_detail(): void
+    {
+        $user = User::factory()->create();
+        $otherUser = User::factory()->create();
+        $salesPage = SalesPage::query()->create([
+            'user_id' => $otherUser->id,
+            'product_name' => 'Kopi Arabika',
+            'raw_input' => ['description' => 'Kopi premium'],
+            'ai_output' => $this->validAiOutput('Seduh Kopi Premium'),
+            'theme' => null,
+        ]);
+
+        $this->withToken($this->tokenFor($user))
+            ->getJson("/api/sales-pages/{$salesPage->id}")
+            ->assertNotFound();
+    }
+
+    public function test_authenticated_user_can_store_a_sales_page(): void
+    {
+        $user = User::factory()->create();
+
+        $payload = [
+            'product_name' => 'Madu Hutan Liar',
+            'raw_input' => [
+                'description' => 'Madu murni dari hutan kalimantan.',
+                'key_features' => ['Organik', 'Tanpa Gula Tambahan'],
+                'target_audience' => 'Orang dewasa',
+                'price' => 'Rp 150.000',
+                'usp' => 'Garansi uang kembali',
+            ],
+            'ai_output' => $this->validAiOutput('Beli Madu Hutan Asli'),
+            'theme' => 'dark-luxury',
+        ];
+
+        $response = $this->withToken($this->tokenFor($user))
+            ->postJson('/api/sales-pages', $payload);
+
+        $response
+            ->assertCreated()
+            ->assertJson([
+                'product_name' => 'Madu Hutan Liar',
+                'theme' => 'dark-luxury',
+            ]);
+
+        $this->assertDatabaseHas('sales_pages', [
+            'user_id' => $user->id,
+            'product_name' => 'Madu Hutan Liar',
+            'theme' => 'dark-luxury',
+        ]);
+    }
+
+    public function test_authenticated_user_can_delete_their_own_sales_page(): void
+    {
+        $user = User::factory()->create();
+        $salesPage = SalesPage::query()->create([
+            'user_id' => $user->id,
+            'product_name' => 'Madu Hutan Liar',
+            'raw_input' => ['description' => 'Madu murni'],
+            'ai_output' => $this->validAiOutput('Beli Madu Hutan Asli'),
+            'theme' => 'dark-luxury',
+        ]);
+
+        $this->withToken($this->tokenFor($user))
+            ->deleteJson("/api/sales-pages/{$salesPage->id}")
+            ->assertOk()
+            ->assertJson([
+                'message' => 'Sales page deleted successfully.',
+            ]);
+
+        $this->assertDatabaseMissing('sales_pages', [
+            'id' => $salesPage->id,
+        ]);
+    }
+
+    public function test_user_cannot_delete_another_users_sales_page(): void
+    {
+        $user = User::factory()->create();
+        $otherUser = User::factory()->create();
+        $salesPage = SalesPage::query()->create([
+            'user_id' => $otherUser->id,
+            'product_name' => 'Kopi Arabika',
+            'raw_input' => ['description' => 'Kopi premium'],
+            'ai_output' => $this->validAiOutput('Seduh Kopi Premium'),
+            'theme' => null,
+        ]);
+
+        $this->withToken($this->tokenFor($user))
+            ->deleteJson("/api/sales-pages/{$salesPage->id}")
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('sales_pages', [
+            'id' => $salesPage->id,
+        ]);
+    }
+
+    private function tokenFor(User $user): string
+    {
+        return $user->createToken('test-token')->plainTextToken;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validAiOutput(string $headline): array
+    {
+        return [
+            'hero' => [
+                'headline' => $headline,
+                'subheadline' => 'Copy yang persuasif untuk preview.',
+            ],
+            'benefits' => [
+                ['title' => 'Benefit 1', 'description' => 'Deskripsi benefit 1'],
+            ],
+            'features' => ['Feature 1', 'Feature 2'],
+            'social_proof' => [
+                ['name' => 'Dummy Name 1', 'review' => 'Review positif'],
+            ],
+            'pricing' => [
+                'price_text' => 'Rp 150.000',
+                'call_to_action_text' => 'Beli Sekarang',
+                'guarantee' => '30 hari garansi',
+            ],
+        ];
+    }
+}
