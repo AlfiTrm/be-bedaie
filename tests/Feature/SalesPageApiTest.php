@@ -44,10 +44,12 @@ class SalesPageApiTest extends TestCase
         $response
             ->assertOk()
             ->assertJsonCount(1)
-            ->assertJsonFragment([
-                'id' => $ownedPage->id,
-                'product_name' => 'Madu Hutan Liar',
-            ]);
+            ->assertJsonPath('0.id', $ownedPage->id)
+            ->assertJsonPath('0.product_name', 'Madu Hutan Liar')
+            ->assertJsonPath('0.created_at', $ownedPage->created_at?->toJSON())
+            ->assertJsonMissingPath('0.raw_input')
+            ->assertJsonMissingPath('0.ai_output')
+            ->assertJsonMissingPath('0.theme');
     }
 
     public function test_authenticated_user_can_view_their_own_sales_page_detail(): void
@@ -66,11 +68,11 @@ class SalesPageApiTest extends TestCase
 
         $response
             ->assertOk()
-            ->assertJson([
-                'id' => $salesPage->id,
-                'product_name' => 'Madu Hutan Liar',
-                'theme' => 'dark-luxury',
-            ]);
+            ->assertJsonPath('id', $salesPage->id)
+            ->assertJsonPath('product_name', 'Madu Hutan Liar')
+            ->assertJsonPath('theme', 'dark-luxury')
+            ->assertJsonPath('raw_input.description', 'Madu murni')
+            ->assertJsonPath('ai_output.hero.headline', 'Beli Madu Hutan Asli');
     }
 
     public function test_user_cannot_view_another_users_sales_page_detail(): void
@@ -112,16 +114,52 @@ class SalesPageApiTest extends TestCase
 
         $response
             ->assertCreated()
-            ->assertJson([
-                'product_name' => 'Madu Hutan Liar',
-                'theme' => 'dark-luxury',
-            ]);
+            ->assertJsonPath('product_name', 'Madu Hutan Liar')
+            ->assertJsonPath('theme', 'dark-luxury')
+            ->assertJsonPath('raw_input.description', 'Madu murni dari hutan kalimantan.')
+            ->assertJsonPath('ai_output.hero.headline', 'Beli Madu Hutan Asli');
 
         $this->assertDatabaseHas('sales_pages', [
             'user_id' => $user->id,
             'product_name' => 'Madu Hutan Liar',
             'theme' => 'dark-luxury',
         ]);
+    }
+
+    public function test_store_sales_page_requires_product_name(): void
+    {
+        $user = User::factory()->create();
+        $payload = $this->validSalesPagePayload();
+        $payload['product_name'] = '';
+
+        $this->withToken($this->tokenFor($user))
+            ->postJson('/api/sales-pages', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['product_name']);
+    }
+
+    public function test_store_sales_page_requires_key_features_to_be_an_array(): void
+    {
+        $user = User::factory()->create();
+        $payload = $this->validSalesPagePayload();
+        $payload['raw_input']['key_features'] = 'Organik';
+
+        $this->withToken($this->tokenFor($user))
+            ->postJson('/api/sales-pages', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['raw_input.key_features']);
+    }
+
+    public function test_store_sales_page_requires_ai_output_hero_headline(): void
+    {
+        $user = User::factory()->create();
+        $payload = $this->validSalesPagePayload();
+        unset($payload['ai_output']['hero']['headline']);
+
+        $this->withToken($this->tokenFor($user))
+            ->postJson('/api/sales-pages', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['ai_output.hero.headline']);
     }
 
     public function test_authenticated_user_can_delete_their_own_sales_page(): void
@@ -171,6 +209,25 @@ class SalesPageApiTest extends TestCase
     private function tokenFor(User $user): string
     {
         return $user->createToken('test-token')->plainTextToken;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validSalesPagePayload(): array
+    {
+        return [
+            'product_name' => 'Madu Hutan Liar',
+            'raw_input' => [
+                'description' => 'Madu murni dari hutan kalimantan.',
+                'key_features' => ['Organik', 'Tanpa Gula Tambahan'],
+                'target_audience' => 'Orang dewasa',
+                'price' => 'Rp 150.000',
+                'usp' => 'Garansi uang kembali',
+            ],
+            'ai_output' => $this->validAiOutput('Beli Madu Hutan Asli'),
+            'theme' => 'dark-luxury',
+        ];
     }
 
     /**
