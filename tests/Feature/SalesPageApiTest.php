@@ -126,6 +126,30 @@ class SalesPageApiTest extends TestCase
         ]);
     }
 
+    public function test_authenticated_user_can_store_preview_html_inside_ai_output(): void
+    {
+        $user = User::factory()->create();
+        $payload = $this->validSalesPagePayload();
+        $payload['ai_output']['preview_html'] = '<!DOCTYPE html><html><body><section>Preview HTML</section></body></html>';
+
+        $response = $this->withToken($this->tokenFor($user))
+            ->postJson('/api/sales-pages', $payload);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('ai_output.preview_html', '<!DOCTYPE html><html><body><section>Preview HTML</section></body></html>');
+
+        $this->assertDatabaseHas('sales_pages', [
+            'user_id' => $user->id,
+            'product_name' => 'Madu Hutan Liar',
+        ]);
+
+        $this->assertSame(
+            '<!DOCTYPE html><html><body><section>Preview HTML</section></body></html>',
+            SalesPage::query()->firstOrFail()->ai_output['preview_html'] ?? null,
+        );
+    }
+
     public function test_store_sales_page_requires_product_name(): void
     {
         $user = User::factory()->create();
