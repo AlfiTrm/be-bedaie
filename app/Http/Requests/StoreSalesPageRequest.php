@@ -41,6 +41,7 @@ class StoreSalesPageRequest extends FormRequest
             'ai_output.pricing.price_text' => ['required', 'string'],
             'ai_output.pricing.call_to_action_text' => ['required', 'string'],
             'ai_output.pricing.guarantee' => ['required', 'string'],
+            'ai_output.preview_html' => ['nullable', 'string'],
             'theme' => ['nullable', 'string', 'max:255'],
         ];
     }
